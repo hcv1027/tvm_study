@@ -1,0 +1,44 @@
+cmake .. \
+-DCMAKE_BUILD_TYPE=RELEASE \
+-DCMAKE_INSTALL_PREFIX=/workspace/tools/opencv/opencv-4.6.0/install/x86_64 \
+-DOPENCV_EXTRA_MODULES_PATH=../../opencv_contrib-4.6.0/modules/ccalib \
+-DWITH_CUDA=OFF \
+-DWITH_FFMPEG=OFF \
+-DWITH_GTK=OFF \
+-DWITH_QT=OFF \
+-DWITH_WIN32UI=OFF \
+-DHIGHGUI_ENABLE_PLUGINS=OFF \
+-DOPENCV_GENERATE_PKGCONFIG=ON \
+-DBUILD_EXAMPLES=OFF \
+-DBUILD_JAVA=OFF \
+-DBUILD_FAT_JAVA_LIB=OFF \
+-DINSTALL_PYTHON_EXAMPLES=OFF \
+-DINSTALL_C_EXAMPLES=OFF \
+-DBUILD_opencv_python2=OFF \
+-DBUILD_opencv_python3=OFF
+
+avcodec avformat avutil swscale avresample (optional)
+
+
+git checkout tags/4.5.5 -b v4.5.5
+
+
+
+Please make sure that
+ -   PATH includes /usr/local/cuda-11.4/bin
+ -   LD_LIBRARY_PATH includes /usr/local/cuda-11.4/lib64, or, add /usr/local/cuda-11.4/lib64 to /etc/ld.so.conf and run ldconfig as root
+
+
+
+
+git submodule add git@git.gallopwave.com:avp/library/opencv.git external/opencv
+
+
+
+cmake -DARCHITECTURE=x86_64 -DCMAKE_BUILD_TYPE=Release -DVC_BUILD_TYPE=OFFLINE -DDEFINE_USE_CV_CUDA=On -DMEMORY_CHECK=ON ..
+
+export ASAN_OPTIONS=protect_shadow_gap=0
+export LD_LIBRARY_PATH=/workspace/avp2.0/modules/perception/external/onnxruntime/1.12.1/x86_64/lib/:/workspace/avp2.0/modules/sensor_recorder/external/opencv/4.5.5/x86_64/lib/:$LD_LIBRARY_PATH
+
+wget https://developer.download.nvidia.com/compute/cuda/11.4.4/local_installers/cuda_11.4.4_470.82.01_linux.run
+sudo sh cuda_11.4.4_470.82.01_linux.run

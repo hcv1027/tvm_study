@@ -1,0 +1,63 @@
+docker build --no-cache -t tvm:v3 -f Dockerfile.cross_qualcomm .
+docker run -it --name tvm_env -p 9190:9190 --volume="/home/josper/workspace/:/workspace/" tvm:v3 /bin/bash
+
+docker build --no-cache -t tvm_x86_cl:v1 -f Dockerfile.x86_nv_cl .
+docker run --gpus all -it --name tvm_x86_cl -p 9191:9190 --volume="/home/josper/workspace/:/workspace/" tvm_x86_cl:v1 /bin/bash
+
+
+
+/opt/conda/bin/conda init bash
+/opt/conda/bin/conda init zsh
+source ~/.bashrc
+conda env create --file conda/build-environment.yaml
+conda activate tvm-build
+pip3 install numpy decorator attrs typing-extensions psutil scipy tornado tornado psutil 'xgboost>=1.1.0' cloudpickle onnx onnxoptimizer
+mv /opt/conda/envs/tvm-build/lib/libstdc++.so.6 /opt/conda/envs/tvm-build/lib/libstdc++.so.6.bak
+ln -s /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /opt/conda/envs/tvm-build/lib/libstdc++.so.6
+export TVM_CONFIGS_JSON_DIR=/workspace/tvm/configs/host/
+
+conda build --output-folder=conda/pkg  conda/recipe
+conda install tvm -c ./conda/pkg
+
+
+/workspace/gallopwave/tvm# python3 -m tvm.exec.rpc_tracker --port 9190
+export TVM_TRACKER_HOST=172.19.134.19
+export TVM_TRACKER_PORT=9190
+export TVM_NDK_CC=/workspace/tvm/example/standalone-toolchain/bin/aarch64-linux-android-g++
+
+adb reverse tcp:9190 tcp:9190
+adb forward tcp:5000 tcp:5000
+./tvm_rpc server --host=0.0.0.0 --port=5000 --tracker=172.19.134.19:9190 --key=android --port-end=5100
+
+
+
+GPU:
+tvmc compile \
+--cross-compiler /workspace/tools/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang \
+--target="opencl, llvm" --target-llvm-mtriple aarch64-linux-gnu --target-opencl-device adreno \
+-o /workspace/tda4/road_pilot/road_pilot_portable/models/LaneFinderTIDL_v2/onnx/head_modules.tar \
+/workspace/tda4/road_pilot/road_pilot_portable/models/LaneFinderTIDL_v2/onnx/head_modules.onnx
+
+tvmc compile \
+--cross-compiler /workspace/tools/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang \
+--target="opencl, clml, llvm" --desired-layout NCHW --target-llvm-mtriple aarch64-linux-gnu --target-opencl-device adreno \
+-o /workspace/tvm/models/g2208_b_4_output_concat.tar \
+/workspace/tvm/models/g2208_b_4_output_concat.onnx
+
+
+tvmc compile \
+--cross-compiler /workspace/tools/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang \
+--target="opencl, clml, llvm" --desired-layout NCHW --target-llvm-mtriple aarch64-linux-gnu --target-opencl-device adreno \
+-o /workspace/tda4/road_pilot/road_pilot_portable/models/LaneFinderTIDL_v2/onnx/head_modules.tar \
+/workspace/tda4/road_pilot/road_pilot_portable/models/LaneFinderTIDL_v2/onnx/head_modules.onnx
+
+
+CPU:
+tvmc compile \
+--cross-compiler /workspace/tools/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang \
+--target="llvm -mtriple=aarch64-linux-android" \
+-o /workspace/tda4/road_pilot/road_pilot_portable/models/LaneFinderTIDL_v2/onnx/post_process.tar \
+/workspace/tda4/road_pilot/road_pilot_portable/models/LaneFinderTIDL_v2/onnx/post_process.onnx
+
+
+
