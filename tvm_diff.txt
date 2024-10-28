@@ -1,0 +1,162 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 89497c3..7796cbd 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -153,6 +153,16 @@ elseif(X8664_DEV STREQUAL "QNN_simulator")
+     )
+ endif()
+ 
++# TVM
++add_subdirectory(${EXTERNALS_DIR}/dlpack)
++add_subdirectory(${EXTERNALS_DIR}/dmlc-core)
++find_package(CUDA REQUIRED)
++
++find_package(tvm REQUIRED
++    PATHS ${EXTERNALS_DIR}/tvm_host_x86/lib/cmake
++    NO_DEFAULT_PATH
++)
++
+ # Common source files
+ set(COMMON_SOURCE_FILES
+     ${CMAKE_CURRENT_SOURCE_DIR}/src/apis/common_api.cpp
+@@ -420,6 +430,29 @@ target_link_libraries(road_pilot_server PUBLIC
+ )
+ endif() # if(ANDROID_DEVi STREQUAL "SA8295")
+ 
++
++
++# add_executable(tvm_runtime_test
++#     ${CMAKE_CURRENT_SOURCE_DIR}/src/test/tvm_runtime_sample.cpp
++# )
++# 
++# target_include_directories(tvm_runtime_test PUBLIC
++#     ${PROJECT_SOURCE_DIR}/include
++#     ${CMAKE_CURRENT_SOURCE_DIR}/lib/yaml-cpp/include
++#     ${OpenCV_INCLUDE_DIRS}
++#     ${EIGEN3_INCLUDE_DIR}
++#     ${CUDA_INCLUDE_DIRS}
++# )
++# 
++# target_link_libraries(tvm_runtime_test PUBLIC
++#     road_pilot
++#     ${OpenCV_LIBS}
++#     tvm::tvm_runtime
++#     dlpack
++#     dmlc
++#     ${CUDA_LIBRARIES}
++# )
++
+ # Include CMakePackageConfigHelpers module
+ include(CMakePackageConfigHelpers)
+ 
+diff --git a/cmake/x86_64_cuda.cmake b/cmake/x86_64_cuda.cmake
+index e856fe3..7aa988b 100644
+--- a/cmake/x86_64_cuda.cmake
++++ b/cmake/x86_64_cuda.cmake
+@@ -9,12 +9,14 @@ set(PLATFORM_SPECIFIC_SOURCE_FILES
+     # memory
+     ${SRC_DIR}/memory/memory_manager_cpu.cpp
+     # model_pipeline
+-    ${SRC_DIR}/model_pipeline/model_pipeline_onnx.cpp
++    # ${SRC_DIR}/model_pipeline/model_pipeline_onnx.cpp
++    ${SRC_DIR}/model_pipeline/model_pipeline_tvm.cpp
+     # model_wrapper
+-    ${SRC_DIR}/model_wrapper/onnxruntime/util/ort_session_cpu.cpp
+-    ${SRC_DIR}/model_wrapper/onnxruntime/util/ort_session_cuda.cpp
+-    ${SRC_DIR}/model_wrapper/onnxruntime/model_wrapper_onnx_cuda.cpp
+-    ${SRC_DIR}/model_wrapper/onnxruntime/model_wrapper_onnx_common.cpp
++    # ${SRC_DIR}/model_wrapper/onnxruntime/util/ort_session_cpu.cpp
++    # ${SRC_DIR}/model_wrapper/onnxruntime/util/ort_session_cuda.cpp
++    # ${SRC_DIR}/model_wrapper/onnxruntime/model_wrapper_onnx_cuda.cpp
++    # ${SRC_DIR}/model_wrapper/onnxruntime/model_wrapper_onnx_common.cpp
++    ${SRC_DIR}/model_wrapper/tvm/model_wrapper_tvm.cpp
+     # preprocess
+     ${SRC_DIR}/preprocess/preprocess_block_crop_cpu.cpp
+     ${SRC_DIR}/preprocess/preprocess_block_hwc2chw_cpu.cpp
+@@ -77,6 +79,7 @@ set(PLATFORM_SPECIFIC_INCLUDE_DIRS
+     ${EXTERNAL_DIR}/onnxruntime/1.8.1/x86_64/include/onnxruntime/
+     # mmdeploy
+     ${LIB_DIR}/mmdeploy/include/
++    ${CUDA_INCLUDE_DIRS}
+ )
+ 
+ set(PLATFORM_SPECIFIC_LIBS
+@@ -85,5 +88,9 @@ set(PLATFORM_SPECIFIC_LIBS
+     ${EXTERNAL_DIR}/onnxruntime/1.8.1/x86_64/lib/libonnxruntime_providers_cuda.so
+     # mmdeploy
+     ${LIB_DIR}/mmdeploy/lib/x86_64/libmmdeploy_onnxruntime_ops.so
++    tvm::tvm_runtime
++    dlpack
++    dmlc
++    ${CUDA_LIBRARIES}
+ )
+ 
+diff --git a/src/model_wrapper/onnxruntime/model_wrapper_onnx_common.cpp b/src/model_wrapper/onnxruntime/model_wrapper_onnx_common.cpp
+index 9f840fc..47b5192 100644
+--- a/src/model_wrapper/onnxruntime/model_wrapper_onnx_common.cpp
++++ b/src/model_wrapper/onnxruntime/model_wrapper_onnx_common.cpp
+@@ -1,15 +1,17 @@
++#include <chrono>
+ #include <iostream>
+ #include <numeric>
+ #include <stdexcept>
+ #include <string>
+ #include "gw_perception/common/core/types.h"
+ #include "gw_perception/common/core/utils.h"
+-#include "gw_perception/common/model_wrapper/onnxruntime/model_wrapper_onnx.h"
+ #include "gw_perception/common/logger/logger.h"
++#include "gw_perception/common/model_wrapper/onnxruntime/model_wrapper_onnx.h"
+ #include "onnxruntime/core/session/onnxruntime_cxx_api.h"
+ 
+ namespace road_pilot {
+ 
++static std::chrono::nanoseconds total_run_time_{0};
+ static TensorInfo GetTensorTypeInfo(Ort::TensorTypeAndShapeInfo &&tensor_info) {
+     TensorInfo info;
+     std::vector<int64_t> dims = tensor_info.GetShape();
+@@ -69,9 +71,13 @@ ModelWrapperOnnx::~ModelWrapperOnnx() {
+     for (size_t i = 0; i < output_names_.size(); ++i) {
+         allocator_.Free(output_names_[i]);
+     }
++    // Convert the total_run_time_ from nanoseconds to milliseconds
++    std::cout << "ModelWrapperTvm take " << total_run_time_.count() / 1e6
++              << " ms" << std::endl;
+ }
+ 
+ void ModelWrapperOnnx::RunInference() {
++    static bool warm_up = true;
+     if (is_output_dynamic_) {
+         // When the output tensor dimension is dynamic, we need to get the
+         // output tensor from the session after running the inference
+@@ -99,10 +105,19 @@ void ModelWrapperOnnx::RunInference() {
+             output_tensor_.emplace_back(tensor);
+         }
+     } else {
++        auto start = std::chrono::high_resolution_clock::now();
+         session_->Run(Ort::RunOptions{nullptr}, input_names_.data(),
+                       ort_in_tensor_.data(), ort_in_tensor_.size(),
+                       output_names_.data(), ort_out_tensor_.data(),
+                       ort_out_tensor_.size());
++        auto end = std::chrono::high_resolution_clock::now();
++        std::chrono::nanoseconds duration_ns =
++            std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
++        if (warm_up) {
++            warm_up = false;
++        } else {
++            total_run_time_ += duration_ns;
++        }
+     }
+ }
+ 
+diff --git a/src/postprocess/object_detection/postprocess_cpu.cpp b/src/postprocess/object_detection/postprocess_cpu.cpp
+index 8ec9578..c22c90d 100755
+--- a/src/postprocess/object_detection/postprocess_cpu.cpp
++++ b/src/postprocess/object_detection/postprocess_cpu.cpp
+@@ -238,6 +238,7 @@ void PostprocessObjDet::RunPostprocess(std::vector<Tensor>& output_tensors) {
+         }
+ 
+         NMS(pred_results, 0.5);
++        LOG_INFO << "pred_results.size() = " << pred_results.size();
+ 
+         objs_[batch_idx].resize(pred_results.size());
+         std::vector<std::pair<float, float>> pts(2);
