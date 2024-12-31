@@ -24,6 +24,8 @@ echo set\(USE_RPC ON\) >> config.cmake
 echo set\(USE_LLVM ON\) >> config.cmake
 echo set\(BACKTRACE_ON_SEGFAULT ON\) >> config.cmake
 echo set\(SUMMARIZE ON\) >> config.cmake
+# Debug
+echo set\(USE_RELAY_DEBUG ON\) >> config.cmake
 
 cmake .. \
     -DCMAKE_INSTALL_PREFIX=/workspace/tvm/tvm_host_x86/ \
