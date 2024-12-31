@@ -42,6 +42,7 @@ docker run --gpus all -it --name tvm_x86_cl -p 9191:9190 --volume="/home/josper/
 conda env create --file conda/build-environment.yaml
 conda activate tvm-build
 pip3 install numpy decorator attrs typing-extensions psutil scipy tornado 'xgboost>=1.1.0' cloudpickle onnx onnxoptimizer
+pip install onnxruntime-gpu --index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-11/pypi/simple/
 
 mv /opt/conda/envs/tvm-build/lib/libstdc++.so.6 /opt/conda/envs/tvm-build/lib/libstdc++.so.6.bak
 ln -s /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /opt/conda/envs/tvm-build/lib/libstdc++.so.6
@@ -49,6 +50,9 @@ ln -s /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /opt/conda/envs/tvm-build/lib/lib
 conda build --output-folder=conda/pkg conda/recipe
 conda install tvm -c ./conda/pkg
 ```
+
+Reference link:
+[Install ONNX Runtime GPU (CUDA 11.x)](https://onnxruntime.ai/docs/install/#install-onnx-runtime-gpu-cuda-11x)
 
 ## 4. Build `libtvm.so` and `libtvm_runtime.so`
 ### Cross compile case:
